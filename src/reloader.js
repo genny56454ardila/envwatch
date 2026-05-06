@@ -1,73 +1,71 @@
 /**
  * reloader.js
- * Orchestrates watching a .env file, diffing changes,
- * optionally saving snapshots, and restarting the child process.
+ * Orchestrates env change detection and process hot-reload.
  */
 
-const { watchEnvFile } = require('./fileWatcher');
-const { diffEnv, hasChanges } = require('./diffEnv');
 const { parseEnvFile } = require('./envParser');
-const { killCurrentProcess, spawnProcess } = require('./processManager');
+const { diffEnv, hasChanges } = require('./diffEnv');
+const { killCurrentProcess, spawnProcess, getCurrentProcess } = require('./processManager');
+const { saveSnapshot, loadSnapshot } = require('./snapshotManager');
 const { log } = require('./logger');
-const { saveSnapshot } = require('./snapshotManager');
+const { validateEnv } = require('./envValidator');
 
-let previousEnv = {};
-
-function applyEnvToProcess(envVars) {
-  Object.assign(process.env, envVars);
-}
-
-function handleEnvChange(envFilePath, command, options = {}) {
-  let currentEnv;
-  try {
-    currentEnv = parseEnvFile(envFilePath);
-  } catch (err) {
-    log('error', `Failed to parse ${envFilePath}: ${err.message}`);
-    return;
-  }
-
-  const diff = diffEnv(previousEnv, currentEnv);
-
-  if (!hasChanges(diff)) {
-    log('info', 'No meaningful .env changes detected, skipping reload.');
-    return;
-  }
-
-  log('info', `Detected .env changes: +${diff.added.length} added, ~${diff.changed.length} changed, -${diff.removed.length} removed`);
-
-  if (options.snapshots) {
-    try {
-      const raw = require('fs').readFileSync(envFilePath, 'utf8');
-      saveSnapshot(raw);
-      log('debug', 'Snapshot saved before reload.');
-    } catch (err) {
-      log('warn', `Could not save snapshot: ${err.message}`);
-    }
-  }
-
-  applyEnvToProcess(currentEnv);
-  previousEnv = { ...currentEnv };
-
-  killCurrentProcess(() => {
-    log('info', `Restarting: ${command.join(' ')}`);
-    spawnProcess(command, process.env);
-  });
-}
-
-function startReloader(envFilePath, command, options = {}) {
-  try {
-    previousEnv = parseEnvFile(envFilePath);
-  } catch (_) {
-    previousEnv = {};
-  }
-
-  applyEnvToProcess(previousEnv);
-  log('info', `Watching ${envFilePath} for changes...`);
+/**
+ * Apply updated env vars to process.env and restart the child process.
+ * @param {Object} newEnv
+ * @param {string[]} command
+ */
+function applyEnvToProcess(newEnv, command) {
+  Object.assign(process.env, newEnv);
+  killCurrentProcess();
   spawnProcess(command, process.env);
-
-  watchEnvFile(envFilePath, () => {
-    handleEnvChange(envFilePath, command, options);
-  });
 }
 
-module.exports = { startReloader, handleEnvChange };
+/**
+ * Handle a detected .env file change.
+ * @param {string} envPath
+ * @param {string[]} command
+ * @param {Object} [schema] - optional validation schema
+ */
+async function handleEnvChange(envPath, command, schema) {
+  try {
+    const newEnv = await parseEnvFile(envPath);
+
+    if (schema) {
+      const { valid, errors } = validateEnv(newEnv, schema);
+      if (!valid) {
+        log('warn', 'Env validation failed — skipping reload:');
+        errors.forEach(e => log('warn', `  ${e}`));
+        return;
+      }
+    }
+
+    const oldEnv = (await loadSnapshot()) || {};
+    const diff = diffEnv(oldEnv, newEnv);
+
+    if (!hasChanges(diff)) {
+      log('info', 'No effective env changes detected.');
+      return;
+    }
+
+    log('info', `Env changed — reloading process (${Object.keys(diff.added).length} added, ${Object.keys(diff.modified).length} modified, ${diff.removed.length} removed)`);
+    await saveSnapshot(newEnv);
+    applyEnvToProcess(newEnv, command);
+  } catch (err) {
+    log('error', `Failed to handle env change: ${err.message}`);
+  }
+}
+
+/**
+ * Start the reloader: spawn initial process and begin watching.
+ * @param {Object} config
+ * @param {Function} watchFn - watchEnvFile from fileWatcher
+ */
+function startReloader(config, watchFn) {
+  const { envPath, command, schema } = config;
+  log('info', `Starting envwatch on ${envPath}`);
+  spawnProcess(command, process.env);
+  watchFn(envPath, () => handleEnvChange(envPath, command, schema));
+}
+
+module.exports = { applyEnvToProcess, handleEnvChange, startReloader };
