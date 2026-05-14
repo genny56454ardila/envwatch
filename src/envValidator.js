@@ -59,4 +59,15 @@ function loadSchema(schemaPath) {
   }
 }
 
-module.exports = { validateEnv, validateType, validatePattern, loadSchema };
+/**
+ * Check for env keys that are present but not defined in the schema.
+ * Useful for detecting unexpected or undocumented variables.
+ * @param {Object} env - key/value pairs from parsed .env
+ * @param {Object} schema - validation schema
+ * @returns {string[]} list of keys found in env but not in schema
+ */
+function findUnknownKeys(env, schema) {
+  return Object.keys(env).filter((key) => !(key in schema));
+}
+
+module.exports = { validateEnv, validateType, validatePattern, loadSchema, findUnknownKeys };
