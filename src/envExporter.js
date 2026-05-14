@@ -70,6 +70,12 @@ function writeExport(outputPath, content) {
  * @param {string} outputPath
  */
 function exportEnv(envMap, format, outputPath) {
+  if (!envMap || typeof envMap !== 'object') {
+    throw new Error('envMap must be a non-null object');
+  }
+  if (!outputPath || typeof outputPath !== 'string') {
+    throw new Error('outputPath must be a non-empty string');
+  }
   let content;
   switch (format) {
     case 'shell':
