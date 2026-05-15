@@ -27,7 +27,16 @@ function loadRules(rulesFile) {
     throw new Error(`Rules file not found: ${abs}`);
   }
   const raw = fs.readFileSync(abs, 'utf8');
-  return JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse rules file (invalid JSON): ${abs}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Rules file must contain a JSON array: ${abs}`);
+  }
+  return parsed;
 }
 
 export async function runDeprecateCommand(argv = process.argv.slice(2)) {
