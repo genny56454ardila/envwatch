@@ -62,6 +62,16 @@ describe('cloneEnvFile', () => {
     expect(result.count).toBe(1);
     fs.unlinkSync(dest);
   });
+
+  test('returns count of 0 when no keys match prefix', () => {
+    const src = writeTmp('src6.env', 'APP_NAME=test\nAPP_PORT=3000\n');
+    const dest = path.join(os.tmpdir(), `envclone_dest6_${Date.now()}.env`);
+    const result = cloneEnvFile(src, dest, { prefix: 'DB_' });
+    expect(result.count).toBe(0);
+    const written = fs.readFileSync(dest, 'utf8');
+    expect(written.trim()).toBe('');
+    fs.unlinkSync(dest);
+  });
 });
 
 describe('previewClone', () => {
@@ -76,5 +86,15 @@ describe('previewClone', () => {
 
   test('throws if source missing', () => {
     expect(() => previewClone('/missing.env', '/out.env')).toThrow('Source file not found');
+  });
+
+  test('preview respects prefix filter', () => {
+    const src = writeTmp('prev2.env', 'DB_HOST=localhost\nDB_PORT=5432\nAPP_NAME=test\n');
+    const dest = '/tmp/preview_out2.env';
+    const result = previewClone(src, dest, { prefix: 'DB_' });
+    expect(result.entries.DB_HOST).toBe('localhost');
+    expect(result.entries.DB_PORT).toBe('5432');
+    expect(result.entries.APP_NAME).toBeUndefined();
+    expect(fs.existsSync(dest)).toBe(false);
   });
 });
