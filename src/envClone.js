@@ -29,14 +29,7 @@ function cloneEnvFile(src, dest, options = {}) {
 
   const envMap = parseEnvFile(src);
 
-  const filterOpts = {};
-  if (prefix) filterOpts.prefix = prefix;
-  if (only.length) filterOpts.keys = only;
-  if (exclude.length) filterOpts.exclude = exclude;
-
-  const filtered = Object.keys(filterOpts).length
-    ? applyFilters(envMap, filterOpts)
-    : envMap;
+  const filtered = buildFiltered(envMap, { only, exclude, prefix });
 
   const lines = Object.entries(filtered).map(([k, v]) => `${k}=${v}`);
   const content = lines.join('\n') + (lines.length ? '\n' : '');
@@ -63,16 +56,30 @@ function previewClone(src, dest, options = {}) {
   }
 
   const envMap = parseEnvFile(src);
+  const filtered = buildFiltered(envMap, { only, exclude, prefix });
+
+  return { dest, entries: filtered };
+}
+
+/**
+ * Build a filtered env map from options. Extracted to avoid duplication
+ * between cloneEnvFile and previewClone.
+ * @param {object} envMap - parsed key/value pairs
+ * @param {object} opts
+ * @param {string[]} opts.only
+ * @param {string[]} opts.exclude
+ * @param {string|null} opts.prefix
+ * @returns {object}
+ */
+function buildFiltered(envMap, { only = [], exclude = [], prefix = null } = {}) {
   const filterOpts = {};
   if (prefix) filterOpts.prefix = prefix;
   if (only.length) filterOpts.keys = only;
   if (exclude.length) filterOpts.exclude = exclude;
 
-  const filtered = Object.keys(filterOpts).length
+  return Object.keys(filterOpts).length
     ? applyFilters(envMap, filterOpts)
     : envMap;
-
-  return { dest, entries: filtered };
 }
 
 module.exports = { cloneEnvFile, previewClone };
