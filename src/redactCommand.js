@@ -57,8 +57,13 @@ function runRedactCommand(argv) {
 
   if (output) {
     const outPath = path.resolve(output);
-    fs.writeFileSync(outPath, serialized + '\n', 'utf8');
-    log('success', `Redacted env written to ${outPath}`);
+    try {
+      fs.writeFileSync(outPath, serialized + '\n', 'utf8');
+      log('success', `Redacted env written to ${outPath}`);
+    } catch (err) {
+      log('error', `Failed to write output file: ${err.message}`);
+      process.exit(1);
+    }
   } else {
     process.stdout.write(serialized + '\n');
   }
