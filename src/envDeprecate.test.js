@@ -1,80 +1,85 @@
-const {
+import { describe, it, expect } from 'vitest';
+import {
   buildDeprecationMap,
   findDeprecatedKeys,
   applyReplacements,
   formatDeprecationIssues,
   hasDeprecations,
-} = require('./envDeprecate');
+} from './envDeprecate.js';
 
 const makeMap = (obj) => new Map(Object.entries(obj));
 
 describe('buildDeprecationMap', () => {
-  it('builds a map from entries array', () => {
-    const map = buildDeprecationMap([
-      { from: 'OLD_KEY', to: 'NEW_KEY', reason: 'renamed' },
-      { from: 'LEGACY_PORT', to: 'PORT' },
-    ]);
-    expect(map.get('OLD_KEY')).toEqual({ to: 'NEW_KEY', reason: 'renamed' });
-    expect(map.get('LEGACY_PORT')).toEqual({ to: 'PORT', reason: undefined });
+  it('builds a map from array of deprecation rules', () => {
+    const rules = [
+      { key: 'OLD_KEY', replacement: 'NEW_KEY' },
+      { key: 'LEGACY_HOST', replacement: 'APP_HOST' },
+    ];
+    const map = buildDeprecationMap(rules);
+    expect(map.get('OLD_KEY')).toEqual({ replacement: 'NEW_KEY' });
+    expect(map.get('LEGACY_HOST')).toEqual({ replacement: 'APP_HOST' });
   });
 
-  it('returns empty map for empty entries', () => {
-    expect(buildDeprecationMap([]).size).toBe(0);
+  it('supports rules without replacement', () => {
+    const rules = [{ key: 'DEAD_KEY' }];
+    const map = buildDeprecationMap(rules);
+    expect(map.get('DEAD_KEY')).toEqual({ replacement: undefined });
   });
 });
 
 describe('findDeprecatedKeys', () => {
-  const deprecationMap = buildDeprecationMap([
-    { from: 'OLD_KEY', to: 'NEW_KEY', reason: 'renamed' },
-    { from: 'REMOVED_VAR' },
-  ]);
-
-  it('finds deprecated keys in env', () => {
-    const env = makeMap({ OLD_KEY: 'val', ACTIVE: 'yes', REMOVED_VAR: '1' });
-    const issues = findDeprecatedKeys(env, deprecationMap);
-    expect(issues).toHaveLength(2);
-    expect(issues.find(i => i.key === 'OLD_KEY').to).toBe('NEW_KEY');
-    expect(issues.find(i => i.key === 'REMOVED_VAR').to).toBeUndefined();
+  it('returns deprecated keys present in env', () => {
+    const env = makeMap({ OLD_KEY: 'foo', NORMAL: 'bar', LEGACY_HOST: 'localhost' });
+    const rules = [
+      { key: 'OLD_KEY', replacement: 'NEW_KEY' },
+      { key: 'LEGACY_HOST', replacement: 'APP_HOST' },
+    ];
+    const found = findDeprecatedKeys(env, buildDeprecationMap(rules));
+    expect(found.map((f) => f.key)).toContain('OLD_KEY');
+    expect(found.map((f) => f.key)).toContain('LEGACY_HOST');
+    expect(found.map((f) => f.key)).not.toContain('NORMAL');
   });
 
-  it('returns empty array when no deprecated keys present', () => {
-    const env = makeMap({ ACTIVE: 'yes', PORT: '3000' });
-    expect(findDeprecatedKeys(env, deprecationMap)).toEqual([]);
+  it('returns empty array when no deprecated keys found', () => {
+    const env = makeMap({ CLEAN: 'yes' });
+    const rules = [{ key: 'OLD_KEY', replacement: 'NEW_KEY' }];
+    expect(findDeprecatedKeys(env, buildDeprecationMap(rules))).toEqual([]);
   });
 });
 
 describe('applyReplacements', () => {
-  const deprecationMap = buildDeprecationMap([
-    { from: 'OLD_HOST', to: 'HOST' },
-    { from: 'DEAD_VAR' },
-  ]);
-
-  it('renames keys with a replacement', () => {
-    const env = makeMap({ OLD_HOST: 'localhost', PORT: '8080' });
-    const result = applyReplacements(env, deprecationMap);
-    expect(result.get('HOST')).toBe('localhost');
-    expect(result.has('OLD_HOST')).toBe(false);
-    expect(result.get('PORT')).toBe('8080');
+  it('renames deprecated keys to their replacements', () => {
+    const env = makeMap({ OLD_KEY: 'value', KEEP: 'this' });
+    const rules = [{ key: 'OLD_KEY', replacement: 'NEW_KEY' }];
+    const result = applyReplacements(env, buildDeprecationMap(rules));
+    expect(result.has('NEW_KEY')).toBe(true);
+    expect(result.get('NEW_KEY')).toBe('value');
+    expect(result.has('OLD_KEY')).toBe(false);
+    expect(result.get('KEEP')).toBe('this');
   });
 
-  it('keeps key if no replacement defined', () => {
-    const env = makeMap({ DEAD_VAR: 'oops' });
-    const result = applyReplacements(env, deprecationMap);
-    expect(result.get('DEAD_VAR')).toBe('oops');
+  it('removes deprecated keys with no replacement', () => {
+    const env = makeMap({ DEAD_KEY: 'gone', STAY: 'here' });
+    const rules = [{ key: 'DEAD_KEY' }];
+    const result = applyReplacements(env, buildDeprecationMap(rules));
+    expect(result.has('DEAD_KEY')).toBe(false);
+    expect(result.has('STAY')).toBe(true);
   });
 });
 
 describe('formatDeprecationIssues', () => {
-  it('formats issue with to and reason', () => {
-    const lines = formatDeprecationIssues([{ key: 'OLD', to: 'NEW', reason: 'renamed' }]);
-    expect(lines[0]).toContain('DEPRECATED: OLD');
-    expect(lines[0]).toContain('use NEW instead');
-    expect(lines[0]).toContain('renamed');
+  it('formats issues with replacements', () => {
+    const issues = [{ key: 'OLD_KEY', replacement: 'NEW_KEY', value: 'x' }];
+    const lines = formatDeprecationIssues(issues);
+    expect(lines[0]).toMatch(/OLD_KEY/);
+    expect(lines[0]).toMatch(/NEW_KEY/);
   });
 
-  it('formats issue with no replacement', () => {
-    const lines = formatDeprecationIssues([{ key: 'GONE' }]);
-    expect(lines[0]).toBe('DEPRECATED: GONE');
+  it('formats issues without replacements', () => {
+    const issues = [{ key: 'DEAD', replacement: undefined, value: 'y' }];
+    const lines = formatDeprecationIssues(issues);
+    expect(lines[0]).toMatch(/DEAD/);
+    expect(lines[0]).toMatch(/no replacement/i);
   });
 });
 
@@ -83,7 +88,7 @@ describe('hasDeprecations', () => {
     expect(hasDeprecations([{ key: 'X' }])).toBe(true);
   });
 
-  it('returns false for empty array', () => {
+  it('returns false when empty', () => {
     expect(hasDeprecations([])).toBe(false);
   });
 });
